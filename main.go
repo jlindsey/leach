@@ -2,12 +2,20 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
 	consul "github.com/hashicorp/consul/api"
 	"golang.org/x/crypto/acme"
 	"gopkg.in/urfave/cli.v1"
+)
+
+var (
+	// Version is the version of the app, provided by ldflags when building for release.
+	Version = "0.0.0"
+	// GitSHA is the commit of the build.
+	GitSHA = ""
 )
 
 const (
@@ -38,6 +46,8 @@ type csrIdent struct {
 
 func main() {
 	app := cli.NewApp()
+	app.Usage = "Automated LetsEncrypt Consul integration"
+	app.Version = fmt.Sprintf("%s (%s)", Version, GitSHA)
 	app.HideHelp = true
 	app.UsageText = "porter [options]"
 	app.Before = cli.BeforeFunc(getConsulClient)

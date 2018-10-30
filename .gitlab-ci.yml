@@ -1,0 +1,12 @@
+---
+stages:
+  - build
+
+build:
+  stage: build
+  image: golang:latest
+  variables:
+    GOOS: linux
+    GOARCH: amd64
+  script:
+    - make release

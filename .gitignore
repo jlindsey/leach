@@ -57,6 +57,7 @@ Temporary Items
 
 # End of https://www.gitignore.io/api/go,visualstudiocode,osx
 
+bin/
 .envrc
 *.pem
 *.pub
