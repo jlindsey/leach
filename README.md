@@ -11,16 +11,18 @@ the list below is customizable with the `CONSUL_PREFIX` env var or flag and by d
 
 `{PREFIX}/conf` must be a JSON doc like so:
 
-    {
-        "email": "test@example.com",
-        "ident": {
-            "country": ["US"],
-            "province": ["Virginia"],
-            "locality": ["Arlington"],
-            "organization": ["My Org"],
-            "organizational_unit": ["My Dept"]
-        }
+```javascript
+{
+    "email": "test@example.com",
+    "ident": {
+        "country": ["US"],
+        "province": ["Virginia"],
+        "locality": ["Arlington"],
+        "organization": ["My Org"],
+        "organizational_unit": ["My Dept"]
     }
+}
+```
 
 Where `email` is the address to register with LetsEncrypt, and `ident` is the default CSR Subject
 identification info. This will allow the service to start up and generate a new LetsEncrypt
@@ -34,7 +36,9 @@ Cert Management
 
 To request a cert and bring it under management, simply create a new (empty) key under `{PREFIX}/sites`:
 
-    $ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/sites/www.example.com
+```sh
+$ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/sites/www.example.com
+```
 
 This key by itself tells Porter to manage the specified domain's cert with default options: it will request
 if it's missing from its storage, and renew it on a schedule.
@@ -51,7 +55,9 @@ and `www.example.com-key.pem`. This is to allow easy compatibility with
 
 To revoke an issued cert, create a new empty key under `{PREFIX}/rev`:
 
-    $ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.com
+```sh
+$ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.com
+```
 
 This will request a certificate revocation from LE upstream, delete the stored private key and cert keys under
 `{PREFIX}/pki`, and then delete the triggering key from `{PREFIX}/rev` that you just created to prevent a loop.
@@ -59,7 +65,9 @@ If an entry for this cert still exists under `{PREFIX}/sites`, Porter will attem
 
 If you want to go scorched-earth, you can set the `{PREFIX}/rev` to a JSON document of `{"purge": true}`:
 
-    $ curl --request PUT --data '{"purge": true}' http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.com
+```sh
+$ curl --request PUT --data '{"purge": true}' http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.com
+```
 
 This will do everything as described above, but will _also_ delete the entry under `{PREFIX}/sites` and revoke
 the cached LE authorization for the domain.
@@ -71,22 +79,24 @@ The following configuration variables are available to be set in the `{PREFIX}/c
 in `sites/` unless otherwise noted. Defaults are shown below. Options with a `*` are required and
 have no default.
 
-    {
-        // Email address to register with LE
-        "email": *,
+```javascript
+{
+    // Email address to register with LE
+    "email": *,
 
-        // CSR Subject values for requesting certs. All keys below are required and must be arrays.
-        "ident": {
-           "country": [*],
-           "province": [*],
-           "locality": [*],
-           "organization": [*],
-           "organizational_unit": [*]
-        },
+    // CSR Subject values for requesting certs. All keys below are required and must be arrays.
+    "ident": {
+        "country": [*],
+        "province": [*],
+        "locality": [*],
+        "organization": [*],
+        "organizational_unit": [*]
+    },
 
-        // Time in days to wait before requesting a cert renewal. Must be 1 < x < 90.
-        "renew": 60,
+    // Time in days to wait before requesting a cert renewal. Must be 1 < x < 90.
+    "renew": 60,
 
-        // Additional names to request on this cert, making it a SAN cert (sites/ only).
-        "extra_names": []
-    }
+    // Additional names to request on this cert, making it a SAN cert (sites/ only).
+    "extra_names": []
+}
+```
