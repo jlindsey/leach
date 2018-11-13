@@ -1,0 +1,17 @@
+{
+    "email": "mailto:$EMAIL_ADDR",
+    "ident": {
+        "country": ["US"],
+        "province": ["Virginia"],
+        "locality": ["Arlington"],
+        "organization": ["My Org"],
+        "organizational_unit": ["My Dept"]
+    },
+    "dns_config": {
+        "default": {
+            "provider": "digitalocean",
+            "token": "abc123",
+            "zone": "example.com"
+        }
+    }
+}

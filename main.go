@@ -1,14 +1,46 @@
+// Copyright 2018 Josh Lindsey <joshua.s.lindsey@gmail.com>
+//
+//
+//    Licensed under the Apache License, Version 2.0 (the "License");
+//    you may not use this file except in compliance with the License.
+//    You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//    Unless required by applicable law or agreed to in writing, software
+//    distributed under the License is distributed on an "AS IS" BASIS,
+//    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//    See the License for the specific language governing permissions and
+//    limitations under the License.
+
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"time"
+	"strings"
 
 	consul "github.com/hashicorp/consul/api"
+	"github.com/hashicorp/go-hclog"
+	"github.com/imdario/mergo"
 	"golang.org/x/crypto/acme"
 	"gopkg.in/urfave/cli.v1"
+)
+
+const (
+	defaultConsulAddr   = "127.0.0.1:8500"
+	defaultConsulPrefix = "leach"
+	defaultLogLevel     = "INFO"
+
+	acmeStagingURL = "https://acme-staging.api.letsencrypt.org/directory"
+
+	consulConfigKey    = "config"
+	consulAuthKey      = "auth"
+	consulSitesPrefix  = "sites"
+	consulPKIPrefix    = "pki"
+	consulRevokePrefix = "revoke"
 )
 
 var (
@@ -16,52 +48,27 @@ var (
 	Version = "0.0.0"
 	// GitSHA is the commit of the build.
 	GitSHA = ""
+
+	baseLogger hclog.Logger
 )
-
-const (
-	keyBits         = 2048
-	certDuration    = 90 * 24 * time.Hour // LE only offers 90-day certs
-	configKey       = "base_ident"
-	authKey         = "auth"
-	sitesKey        = "sites"
-	pkiKey          = "pki"
-	stagingEndpoint = "https://acme-staging.api.letsencrypt.org/directory"
-)
-
-type contextStoreKey int
-
-const (
-	ctxConsulClient contextStoreKey = iota
-	ctxConsulPrefix
-	ctxLetsEncryptEndpoint
-)
-
-type csrIdent struct {
-	Country            []string `json:"country"`
-	Province           []string `json:"province"`
-	Locality           []string `json:"locality"`
-	Organization       []string `json:"organization"`
-	OrganizationalUnit []string `json:"organizational_unit"`
-}
 
 func main() {
 	app := cli.NewApp()
-	app.Usage = "Automated LetsEncrypt Consul integration"
+	app.Usage = "Lets Encrypt Automated Certificate Handler"
 	app.Version = fmt.Sprintf("%s (%s)", Version, GitSHA)
 	app.HideHelp = true
-	app.UsageText = "porter [options]"
-	app.Before = cli.BeforeFunc(getConsulClient)
+	app.UsageText = "leach [options]"
 	app.Action = run
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:   "consul-addr, a",
-			Value:  "127.0.0.1:8500",
+			Value:  defaultConsulAddr,
 			Usage:  "Connect to Consul running at `ADDR`",
 			EnvVar: "CONSUL_ADDR",
 		},
 		cli.StringFlag{
 			Name:   "consul-prefix, c",
-			Value:  "porter",
+			Value:  defaultConsulPrefix,
 			Usage:  "Consul KV store `PREFIX` for configuration and storage",
 			EnvVar: "CONSUL_PREFIX",
 		},
@@ -71,14 +78,10 @@ func main() {
 			EnvVar: "LE_STAGING",
 		},
 		cli.StringFlag{
-			Name:   "infoblox-user, u",
-			Usage:  "Use `USER` to authenticate with the Infoblox API",
-			EnvVar: "INFOBLOX_USER",
-		},
-		cli.StringFlag{
-			Name:   "infoblox-pass, p",
-			Usage:  "Use `PASS` to authenticate with the Infoblox API",
-			EnvVar: "INFOBLOX_PASS",
+			Name:   "log-level, l",
+			Usage:  "Set the logger to the specified `LEVEL`",
+			Value:  defaultLogLevel,
+			EnvVar: "LOG_LEVEL",
 		},
 		cli.BoolFlag{
 			Name:  "help, h",
@@ -88,7 +91,8 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		panic(err)
+		baseLogger.Error(err.Error())
+		os.Exit(1)
 	}
 }
 
@@ -98,184 +102,169 @@ func run(c *cli.Context) error {
 		return nil
 	}
 
-	consulClient := c.App.Metadata["consul"].(*consul.Client)
+	prefix := c.String("consul-prefix")
+	consulAddr := c.String("consul-addr")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	ctx = context.WithValue(ctx, ctxConsulClient, consulClient)
-	ctx = context.WithValue(ctx, ctxConsulPrefix, c.String("consul-prefix"))
-	uri := acme.LetsEncryptURL
-	if c.Bool("staging") {
-		uri = stagingEndpoint
-	}
-	ctx = context.WithValue(ctx, ctxLetsEncryptEndpoint, uri)
-
-	_, err := getAcmeClient(ctx)
-	if err != nil {
-		cancel()
-		return err
-	}
-
-	cancel()
-
-	return nil
-}
-
-func getConsulClient(c *cli.Context) error {
-	client, err := consul.NewClient(&consul.Config{
-		Address: c.String("consul-addr"),
+	baseLogger = hclog.New(&hclog.LoggerOptions{
+		Name:   prefix,
+		Level:  hclog.LevelFromString(c.String("log-level")),
+		Output: os.Stdout,
 	})
 
+	baseLogger.Trace("Consul", "addr", consulAddr, "prefix", prefix)
+
+	consulConfig := &consul.Config{
+		Address: consulAddr,
+	}
+	consulClient, err := consul.NewClient(consulConfig)
 	if err != nil {
 		return err
 	}
 
-	c.App.Metadata["consul"] = client
-	return nil
+	kv := consulClient.KV()
+	config, err := getConfig(kv, prefix)
+	if err != nil {
+		return err
+	}
+	baseLogger.Trace("Got config", "config", config)
+
+	auth, err := getAuth(kv, prefix)
+	if err != nil {
+		return err
+	}
+	if auth == nil {
+		// New Login
+		auth = &Auth{Email: config.Email}
+	}
+
+	directoryURL := acme.LetsEncryptURL
+	if c.Bool("staging") {
+		directoryURL = acmeStagingURL
+	}
+	baseLogger.Debug("Using directory", "url", directoryURL)
+
+	acmeClient := &acme.Client{DirectoryURL: directoryURL}
+	err = DoAuth(context.TODO(), acmeClient, auth)
+	if err != nil {
+		return err
+	}
+
+	err = setAuth(kv, prefix, auth)
+	if err != nil {
+		return err
+	}
+
+	return watchSites(context.TODO(), prefix, kv, acmeClient, config)
 }
 
-// func do(c *cli.Context) error {
-// 	keyBytes, err := ioutil.ReadFile("key.pem")
-// 	if err != nil {
-// 		panic(err)
-// 	}
+func watchSites(ctx context.Context, prefix string, kv *consul.KV, acmeClient *acme.Client, config *Config) error {
+	logger := baseLogger.Named("watchSites")
+	sitesPath := fmt.Sprintf("%s/%s/", prefix, consulSitesPrefix)
+	siteKeysWatcher := NewKeyWatcher(ctx, kv, sitesPath)
+	go siteKeysWatcher.Watch()
 
-// 	block, _ := pem.Decode(keyBytes)
-// 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	for {
+		siteKeysBytes := <-siteKeysWatcher.Data
+		siteKeys := make([]string, 0)
+		err := json.Unmarshal(siteKeysBytes, &siteKeys)
+		if err != nil {
+			return err
+		}
 
-// 	client := &acme.Client{Key: key}
+		logger.Debug("Updated sites", "keys", siteKeys)
 
-// 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-// 	defer cancel()
-// 	acct, err := client.GetReg(ctx, "")
-// 	if err != nil {
-// 		panic(err)
-// 	}
+		for _, siteKey := range siteKeys {
+			siteConfig, err := getSiteConfig(kv, siteKey, config)
+			if err != nil {
+				return err
+			}
 
-// 	fmt.Printf("Account URI: %s\n", acct.URI)
-// 	fmt.Printf("Account Authz: %s\n", acct.Authz)
+		}
+	}
+}
 
-// 	auth, err := client.Authorize(context.Background(), "ui.jlindsey.me")
-// 	if err != nil {
-// 		panic(err)
-// 	}
+func getSiteConfig(kv *consul.KV, key string, config *Config) (*SiteConfig, error) {
+	split := strings.Split(key, "/")
+	fqdn := split[len(split)-1]
 
-// 	spew.Dump(auth)
+	pair, _, err := kv.Get(key, nil)
+	if err != nil {
+		return nil, err
+	}
 
-// 	if auth.Status != "valid" {
-// 		var dnsChallenge *acme.Challenge
-// 		for _, chal := range auth.Challenges {
-// 			if chal.Type == "dns-01" {
-// 				dnsChallenge = chal
-// 				break
-// 			}
-// 		}
+	if pair == nil {
+		return nil, fmt.Errorf("No site config found at %s", key)
+	}
 
-// 		if dnsChallenge == nil {
-// 			panic("no dns challenge")
-// 		}
+	siteConfig := new(SiteConfig)
+	if err = json.Unmarshal(pair.Value, siteConfig); err != nil {
+		return nil, err
+	}
 
-// 		dnsChallenge, err = client.Accept(context.Background(), dnsChallenge)
-// 		if err != nil {
-// 			panic(err)
-// 		}
+	siteConfig.FQDN = fqdn
 
-// 		s, err := client.DNS01ChallengeRecord(dnsChallenge.Token)
-// 		if err != nil {
-// 			panic(err)
-// 		}
+	if err = mergo.Merge(siteConfig, config); err != nil {
+		return nil, err
+	}
 
-// 		spew.Dump(s)
+	return siteConfig, nil
+}
 
-// 		dnsReqBody := map[string]string{
-// 			"type": "TXT",
-// 			"name": "_acme-challenge.ui",
-// 			"ttl":  "300",
-// 			"data": s,
-// 		}
-// 		body, err := json.Marshal(dnsReqBody)
-// 		if err != nil {
-// 			panic(err)
-// 		}
+func getConfig(kv *consul.KV, prefix string) (*Config, error) {
+	path := fmt.Sprintf("%s/%s", prefix, consulConfigKey)
+	pair, _, err := kv.Get(path, nil)
+	if err != nil {
+		return nil, err
+	}
 
-// 		httpClient := &http.Client{}
-// 		req, err := http.NewRequest("POST", fmt.Sprintf(doDomainAPIURL, "jlindsey.me"), bytes.NewBuffer(body))
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		req.Header.Set("Content-Type", "application/json")
-// 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	if pair == nil {
+		return nil, fmt.Errorf("No config found at %s", path)
+	}
 
-// 		resp, err := httpClient.Do(req)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		defer resp.Body.Close()
+	config := new(Config)
+	if err = json.Unmarshal(pair.Value, config); err != nil {
+		return nil, err
+	}
 
-// 		respBody, err := ioutil.ReadAll(resp.Body)
-// 		if err != nil {
-// 			panic(err)
-// 		}
+	return config, nil
+}
 
-// 		if resp.StatusCode != 201 {
-// 			panic(string(respBody))
-// 		}
-// 	}
+func getAuth(kv *consul.KV, prefix string) (*Auth, error) {
+	path := fmt.Sprintf("%s/%s", prefix, consulAuthKey)
+	pair, _, err := kv.Get(path, nil)
+	if err != nil {
+		return nil, err
+	}
 
-// 	goodAuth, err := client.WaitAuthorization(context.Background(), auth.URI)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	if pair == nil {
+		// It's fine if there's no auth data, just return nil
+		return nil, nil
+	}
 
-// 	spew.Dump(goodAuth)
+	auth := new(Auth)
+	if err = json.Unmarshal(pair.Value, auth); err != nil {
+		return nil, err
+	}
 
-// 	req := &x509.CertificateRequest{
-// 		SignatureAlgorithm: x509.SHA256WithRSA,
-// 		Subject: pkix.Name{
-// 			Country:            []string{"US"},
-// 			Province:           []string{"Virginia"},
-// 			Locality:           []string{"Arlington"},
-// 			Organization:       []string{"jlindsey.me"},
-// 			OrganizationalUnit: []string{"Me"},
-// 			CommonName:         "ui.jlindsey.me",
-// 		},
-// 	}
+	return auth, nil
+}
 
-// 	csr, err := x509.CreateCertificateRequest(rand.Reader, req, key)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+func setAuth(kv *consul.KV, prefix string, auth *Auth) error {
+	path := fmt.Sprintf("%s/%s", prefix, consulAuthKey)
 
-// 	crt, crtURL, err := client.CreateCert(context.Background(), csr, 24*30*time.Hour, true)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	encoded, err := json.Marshal(auth)
+	if err != nil {
+		return err
+	}
 
-// 	fmt.Printf("Cert URL: %s\n", crtURL)
+	data := &consul.KVPair{
+		Key:   path,
+		Value: encoded,
+	}
 
-// 	crtBlock := &pem.Block{
-// 		Bytes: crt[0],
-// 		Type:  "CERTIFICATE",
-// 	}
+	if _, err = kv.Put(data, nil); err != nil {
+		return err
+	}
 
-// 	err = ioutil.WriteFile("ui.jlindsey.me.crt", pem.EncodeToMemory(crtBlock), 0644)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-
-// 	chainBlock := &pem.Block{
-// 		Bytes: make([]byte, 0),
-// 		Type:  "CERTIFICATE",
-// 	}
-
-// 	for _, cert := range crt[1:] {
-// 		for _, b := range cert {
-// 			chainBlock.Bytes = append(chainBlock.Bytes, b)
-// 		}
-// 	}
-
-// 	err = ioutil.WriteFile("ui.jlindsey.me.chain", pem.EncodeToMemory(chainBlock), 0644)
-// 	return nil
-// }
+	return nil
+}

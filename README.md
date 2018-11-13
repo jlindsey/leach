@@ -1,5 +1,7 @@
-Porter
+Leach
 ======
+
+**L**et's **E**ncrypt **A**utomated **C**ertificate **H**andler.
 
 Automated, Consul-driven service for LetsEncrypt certificate requests and renewals.
 
@@ -20,16 +22,20 @@ the list below is customizable with the `CONSUL_PREFIX` env var or flag and by d
         "locality": ["Arlington"],
         "organization": ["My Org"],
         "organizational_unit": ["My Dept"]
-    }
+    },
+    "dns_config": {}
 }
 ```
 
 Where `email` is the address to register with LetsEncrypt, and `ident` is the default CSR Subject
-identification info. This will allow the service to start up and generate a new LetsEncrypt
-account (storing the info in `{PREFIX}/auth`).
+identification info. The `dns_config` object is explained lower down. This will allow the service
+to start up and generate a new LetsEncrypt account (storing the info in `{PREFIX}/auth`).
 
-See below for additional configuration options and their defaults. The two JSON keys above are the
+See below for additional configuration options and their defaults. The three JSON keys above are the
 minimum to get a working setup.
+
+Once the `{PREFIX}/auth` key is created in Consul (after the first successful authentication), you
+should copy this data to a secure backup.
 
 Cert Management
 ---------------
@@ -53,7 +59,7 @@ and `www.example.com-key.pem`. This is to allow easy compatibility with
 
 ### Revocation
 
-To revoke an issued cert, create a new empty key under `{PREFIX}/rev`:
+To revoke an issued cert, create a new empty key under `{PREFIX}/revoke`:
 
 ```sh
 $ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.com
@@ -93,10 +99,93 @@ have no default.
         "organizational_unit": [*]
     },
 
+    // Configuration for the supported DNS providers used for LE auth checks.
+    "dns_config": {
+        "default": {
+            // See "DNS Providers" section below for specifics.
+        }
+    },
+
     // Time in days to wait before requesting a cert renewal. Must be 1 < x < 90.
+    // LetsEncrypt docs recommend 60-day renewals.
     "renew": 60,
 
     // Additional names to request on this cert, making it a SAN cert (sites/ only).
-    "extra_names": []
+    "extra_names": [],
+
+    // DNS provider to use for this cert instead of the deafult (sites/ only).
+    "dns_provider": ""
 }
 ```
+
+### DNS Providers
+
+The following DNS provider backends are included and supported. Pull requests to add more are
+welcome.
+
+Multiple providers of a given type are allowed, but their names (the keys for the config dicts)
+must be unique. There _must_ be exactly one `default` provider.
+
+#### DigitalOcean
+
+```javascript
+{
+    "dns_config": {
+        "default": {
+            // DigitalOcean Provider
+            "provider": "digitalocean",
+
+            // DO API token with access to the hosted DNS zone
+            "token": *,
+
+            // Name of the zone defined in the DO control panel
+            "zone": *
+        }
+    }
+}
+```
+
+#### Infoblox
+
+```javascript
+{
+    "dns_config": {
+        "default": {
+            // Infoblox Provider
+            "provider": "infoblox",
+
+            // Base URL of your Infoblox WAPI endpoint (should include the /wapi/<version> path) 
+            "url": *,
+
+            // Username for basic auth
+            "username": *,
+
+            // Password for basic auth
+            "password": *,
+
+            // DNS view(s) to manage records in
+            // (see: https://docs.infoblox.com/display/NAG8/Chapter+18+DNS+Views)
+            "views": [*]
+        }
+    }
+}
+```
+
+Development
+-----------
+
+Porter is written in Go and requires version >=1.11 for Go modules support.
+
+You will need a local Consul instance to develop against, which can be launched with Docker like so:
+
+```sh
+$ docker run --name consul -d -p 8500:8500 --rm consul
+```
+
+This runs Consul in dev mode and does not persist data to disk, so all data will be lost on
+a restart of the service. A convenience script is provided in `scripts/bootstrap_consul.sh`
+to preload with some data for testing and development. This script requires `curl` and `envsubst`
+to be installed and on your `PATH`.
+
+You should `export LE_STAGING=1` to run against the LetsEncrypt staging environment instead of
+production, which does not return trusted certs but has much more generous rate limits.
