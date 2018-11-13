@@ -9,7 +9,7 @@ Setup
 -----
 
 To bootstrap the tool, a config key needs to be added to Consul's KV store. The `{PREFIX}` in
-the list below is customizable with the `CONSUL_PREFIX` env var or flag and by default is `porter`.
+the list below is customizable with the `CONSUL_PREFIX` env var or flag and by default is `Leach`.
 
 `{PREFIX}/conf` must be a JSON doc like so:
 
@@ -46,7 +46,7 @@ To request a cert and bring it under management, simply create a new (empty) key
 $ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/sites/www.example.com
 ```
 
-This key by itself tells Porter to manage the specified domain's cert with default options: it will request
+This key by itself tells Leach to manage the specified domain's cert with default options: it will request
 if it's missing from its storage, and renew it on a schedule.
 
 You can also set a `sites/` key's value to a JSON document that overrides and customizes the options used. Any
@@ -67,7 +67,7 @@ $ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.co
 
 This will request a certificate revocation from LE upstream, delete the stored private key and cert keys under
 `{PREFIX}/pki`, and then delete the triggering key from `{PREFIX}/rev` that you just created to prevent a loop.
-If an entry for this cert still exists under `{PREFIX}/sites`, Porter will attempt to aquire another.
+If an entry for this cert still exists under `{PREFIX}/sites`, Leach will attempt to aquire another.
 
 If you want to go scorched-earth, you can set the `{PREFIX}/rev` to a JSON document of `{"purge": true}`:
 
@@ -174,7 +174,7 @@ must be unique. There _must_ be exactly one `default` provider.
 Development
 -----------
 
-Porter is written in Go and requires version >=1.11 for Go modules support.
+Leach is written in Go and requires version >=1.11 for Go modules support.
 
 You will need a local Consul instance to develop against, which can be launched with Docker like so:
 
