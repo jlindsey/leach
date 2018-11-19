@@ -38,9 +38,11 @@ type KeyWatcher struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	logger   hclog.Logger
+	data     chan *consul.KVPair
 
-	// Data is a chan into which the raw value data will be sent
-	Data chan []byte
+	// CancelOnMissing instructs the watcher to cancel itself if the key is or
+	// becomes missing.
+	CancelOnMissing bool
 }
 
 // NewKeyWatcher creates a new KeyWatcher. The passed-in context will be used for
@@ -50,7 +52,7 @@ type KeyWatcher struct {
 // If the provided path ends in a `/`, the watcher will return a list of keys with
 // that prefix instead of a value (KV.GetKeys() vs KV.Get()).
 func NewKeyWatcher(ctx context.Context, kv *consul.KV, path string) *KeyWatcher {
-	dataChan := make(chan []byte)
+	dataChan := make(chan *consul.KVPair)
 	innerCtx, cancel := context.WithCancel(ctx)
 
 	return &KeyWatcher{
@@ -58,32 +60,37 @@ func NewKeyWatcher(ctx context.Context, kv *consul.KV, path string) *KeyWatcher 
 		path:   path,
 		ctx:    innerCtx,
 		cancel: cancel,
-		Data:   dataChan,
-		logger: baseLogger.Named("watcher").With("path", path),
+		data:   dataChan,
+		logger: baseLogger.Named("KeyWatcher").With("path", path),
 	}
+}
+
+// Data returns the chan into which updates are written.
+func (k *KeyWatcher) Data() chan *consul.KVPair {
+	return k.data
 }
 
 // Close implements the Closer interface. Stops the watcher routine and closes the
 // Data chan.
 func (k *KeyWatcher) Close() error {
-	k.logger.Debug("Closing")
+	k.logger.Trace("Closing")
 
 	k.cancel()
-	close(k.Data)
+	close(k.data)
 
 	return nil
 }
 
 // Watch starts the watcher. Should be run in a goroutine, preferably with an errgroup.
 func (k *KeyWatcher) Watch() error {
-	logger := k.logger.Named("watch").With("index", k.index)
+	logger := k.logger.Named("Watch").With("index", k.index)
 	logger.Trace("Starting")
 
 	for {
 		select {
 		case <-k.ctx.Done():
 			logger.Trace("Context canceled")
-			return nil
+			return k.Close()
 		default:
 		}
 
@@ -101,7 +108,15 @@ func (k *KeyWatcher) Watch() error {
 		)
 
 		if strings.HasSuffix(k.path, "/") {
-			keys, meta, err = k.client.Keys(k.path, "/", opts)
+			var rawKeys []string
+			rawKeys, meta, err = k.client.Keys(k.path, "/", opts)
+			for _, key := range rawKeys {
+				if key == k.path {
+					continue
+				}
+
+				keys = append(keys, key)
+			}
 		} else {
 			pair, meta, err = k.client.Get(k.path, opts)
 		}
@@ -117,6 +132,11 @@ func (k *KeyWatcher) Watch() error {
 		k.index = meta.LastIndex
 
 		if pair == nil && keys == nil {
+			if k.CancelOnMissing {
+				k.logger.Debug("Key disappeared, canceling")
+				k.cancel()
+			}
+
 			continue
 		}
 
@@ -142,6 +162,11 @@ func (k *KeyWatcher) Watch() error {
 			continue
 		}
 
-		k.Data <- val
+		k.checksum = checksum
+
+		k.data <- &consul.KVPair{
+			Key:   k.path,
+			Value: val,
+		}
 	}
 }

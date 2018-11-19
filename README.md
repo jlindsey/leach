@@ -5,6 +5,9 @@ Leach
 
 Automated, Consul-driven service for LetsEncrypt certificate requests and renewals.
 
+This tool only supports the LE-specific ACME "v1" API (see https://github.com/golang/go/issues/21081
+for further information).
+
 Setup
 -----
 
@@ -62,11 +65,11 @@ and `www.example.com-key.pem`. This is to allow easy compatibility with
 To revoke an issued cert, create a new empty key under `{PREFIX}/revoke`:
 
 ```sh
-$ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/rev/www.example.com
+$ curl --request PUT http://$CONSUL_ADDR/v1/kv/$CONSUL_PREFIX/revoke/www.example.com
 ```
 
 This will request a certificate revocation from LE upstream, delete the stored private key and cert keys under
-`{PREFIX}/pki`, and then delete the triggering key from `{PREFIX}/rev` that you just created to prevent a loop.
+`{PREFIX}/pki`, and then delete the triggering key from `{PREFIX}/revoke` that you just created to prevent a loop.
 If an entry for this cert still exists under `{PREFIX}/sites`, Leach will attempt to aquire another.
 
 If you want to go scorched-earth, you can set the `{PREFIX}/rev` to a JSON document of `{"purge": true}`:
@@ -101,14 +104,12 @@ have no default.
 
     // Configuration for the supported DNS providers used for LE auth checks.
     "dns_config": {
-        "default": {
-            // See "DNS Providers" section below for specifics.
-        }
+        // See "DNS Providers" section below for specifics.
+        "default": *
     },
 
-    // Time in days to wait before requesting a cert renewal. Must be 1 < x < 90.
-    // LetsEncrypt docs recommend 60-day renewals.
-    "renew": 60,
+    // Renew a cert when it has this many days until expiration.
+    "renew": 30,
 
     // Additional names to request on this cert, making it a SAN cert (sites/ only).
     "extra_names": [],
@@ -187,5 +188,5 @@ a restart of the service. A convenience script is provided in `scripts/bootstrap
 to preload with some data for testing and development. This script requires `curl` and `envsubst`
 to be installed and on your `PATH`.
 
-You should `export LE_STAGING=1` to run against the LetsEncrypt staging environment instead of
-production, which does not return trusted certs but has much more generous rate limits.
+You should also set the `ACME_URL` variable to the URL of the [LE Staging Servers](https://letsencrypt.org/docs/staging-environment/),
+which keeps you from being throttled and wasting your domain rate limit on dev and testing.

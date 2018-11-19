@@ -16,22 +16,39 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"net"
+	"strings"
+	"time"
 
 	"golang.org/x/crypto/acme"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	// 2048-bit private keys
-	keyBits = 2048
+	keyBits      = 2048                // 2048-bit private keys
+	certDuration = 90 * 24 * time.Hour // LE only offers 90-day certs
 
+	acmeChallengeTTL       = 300
+	acmeChallengeSubdomain = "_acme-challenge"
+
+	// PEM header types
 	privateKeyType = "RSA PRIVATE KEY"
+	certType       = "CERTIFICATE"
 )
+
+// CertificatePEM is a byte slice representing an x509 Certificate in PEM encoding.
+type CertificatePEM []byte
+
+// PrivateKeyPEM is a byte slice representing an RSA Private Key in PEM encoding.
+type PrivateKeyPEM []byte
 
 // GenPrivateKey generates a new RSA private key
 func GenPrivateKey() (*rsa.PrivateKey, error) {
@@ -59,14 +76,39 @@ func PrivateKeyFromPEM(pemKey interface{}) (*rsa.PrivateKey, error) {
 	return x509.ParsePKCS1PrivateKey(block.Bytes)
 }
 
-// PrivateKeyToPEM takes an RSA private key and returns the PEM-encoded bytes
-func PrivateKeyToPEM(key *rsa.PrivateKey) []byte {
-	block := &pem.Block{
-		Type:  privateKeyType,
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
+// ToPEM takes an RSA private key, a DER-formatted []byte (for a single Certificate), or
+// a slice of DER-formatted []byte ([][]byte, for a Certificate + chain) and returns the
+// PEM-encoded bytes.
+func ToPEM(data interface{}) ([]byte, error) {
+	switch v := data.(type) {
+	case *rsa.PrivateKey:
+		block := &pem.Block{
+			Type:  privateKeyType,
+			Bytes: x509.MarshalPKCS1PrivateKey(v),
+		}
+		return pem.EncodeToMemory(block), nil
+	case [][]byte:
+		// Cert + chain
+		var buf bytes.Buffer
+		for _, b := range v {
+			block := &pem.Block{
+				Type:  certType,
+				Bytes: b,
+			}
+
+			buf.Write(pem.EncodeToMemory(block))
+		}
+		return buf.Bytes(), nil
+	case []byte:
+		// Cert alone
+		block := &pem.Block{
+			Type:  certType,
+			Bytes: v,
+		}
+		return pem.EncodeToMemory(block), nil
 	}
 
-	return pem.EncodeToMemory(block)
+	return nil, fmt.Errorf("unknown data type to convert to PEM: %T", data)
 }
 
 // DoAuth either registers a new account with LE or checks the registration of an existing one.
@@ -108,9 +150,186 @@ func DoAuth(ctx context.Context, client *acme.Client, auth *Auth) error {
 	}
 
 	auth.URI = acct.URI
-	auth.PrivateKey = string(PrivateKeyToPEM(key))
+	pemKey, err := ToPEM(key)
+	if err != nil {
+		return err
+	}
+	auth.PrivateKey = string(pemKey)
 
 	logger.Info("Registered new user", "url", auth.URI)
 
 	return nil
+}
+
+// CreateACMECert creates a new LE cert and key. It returns the cert and private key in pem-encoded format.
+// The provided siteConfig is updated in-place with the internal info to track.
+func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteConfig) (CertificatePEM, PrivateKeyPEM, error) {
+	logger := baseLogger.Named("acme").Named("create").With("fqdn", siteConfig.FQDN)
+
+	provider, err := siteConfig.GetProvider()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	auths := make(map[string]*acme.Authorization, len(siteConfig.ExtraNames)+1)
+	logger.Info("Requesting authorization")
+	auth, err := client.Authorize(ctx, siteConfig.FQDN)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	auths[siteConfig.FQDN] = auth
+
+	for _, fqdn := range siteConfig.ExtraNames {
+		logger.Info("Requesting authorization", "fqdn", fqdn)
+		auth, err := client.Authorize(ctx, fqdn)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		auths[fqdn] = auth
+	}
+
+	var g errgroup.Group
+
+	for fqdn, auth := range auths {
+		g.Go(func() error {
+			innerLogger := logger.With("auth", auth.URI)
+
+			if auth.Status == "valid" {
+				innerLogger.Info("Auth already valid")
+				return nil
+			}
+
+			var challenge *acme.Challenge
+			for _, chal := range auth.Challenges {
+				if chal.Type == "dns-01" {
+					innerLogger.Debug("Found DNS-01 challenge", "challenge", chal)
+					challenge = chal
+					break
+				}
+			}
+
+			if challenge == nil {
+				return fmt.Errorf("No DNS challenge found for auth: %s", fqdn)
+			}
+
+			txtToken, err := client.DNS01ChallengeRecord(challenge.Token)
+			if err != nil {
+				return err
+			}
+
+			// TODO: check for existing record first
+			split := strings.Split(fqdn, ".")
+			subdomain := strings.Join(split[:len(split)-2], ".")
+			protoRecord := &GenericTXTRecord{
+				name: fmt.Sprintf("%s.%s", acmeChallengeSubdomain, subdomain),
+				text: txtToken,
+			}
+
+			innerLogger.Debug("Creating DNS record", "record", protoRecord)
+
+			id, err := provider.Create(protoRecord)
+			if err != nil {
+				return err
+			}
+
+			siteConfig.DNSProviderIDs = append(siteConfig.DNSProviderIDs, id)
+
+			txtFQDN := fmt.Sprintf("%s.%s", acmeChallengeSubdomain, fqdn)
+			innerLogger.Debug("Waiting for DNS", "txtFQDN", txtFQDN)
+
+			for {
+				vals, err := net.LookupTXT(txtFQDN)
+				if err != nil || len(vals) == 0 || vals[0] != txtToken {
+					innerLogger.Trace("Still waiting", "err", err, "vals", vals)
+					time.Sleep(10 * time.Second)
+					continue
+				}
+
+				break
+			}
+
+			challenge, err = client.Accept(ctx, challenge)
+			if err != nil {
+				return err
+			}
+			innerLogger.Debug("Accepted DNS-01 challenge")
+
+			try := 1
+			maxTries := 5
+			sleep := time.Second * 30
+			for {
+				goodAuth, err := client.WaitAuthorization(ctx, auth.URI)
+				if err != nil {
+					if try <= maxTries {
+						innerLogger.Info("Got error from WaitAuthorizaiton", "err", err, "attempt", try, "maxAttemps", maxTries)
+						time.Sleep(sleep)
+						continue
+					}
+
+					return err
+				}
+
+				innerLogger.Info("Auth accepted", "authz", goodAuth.Identifier)
+				break
+			}
+
+			return nil
+		})
+	}
+
+	err = g.Wait()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	privateKey, err := GenPrivateKey()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req := &x509.CertificateRequest{
+		SignatureAlgorithm: x509.SHA256WithRSA,
+		Subject: pkix.Name{
+			Country:            siteConfig.Ident.Country,
+			Province:           siteConfig.Ident.Province,
+			Locality:           siteConfig.Ident.Locality,
+			Organization:       siteConfig.Ident.Organization,
+			OrganizationalUnit: siteConfig.Ident.OrganizationalUnit,
+			CommonName:         siteConfig.FQDN,
+		},
+	}
+
+	if len(siteConfig.ExtraNames) > 0 {
+		req.DNSNames = siteConfig.ExtraNames
+	}
+
+	csr, err := x509.CreateCertificateRequest(rand.Reader, req, privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	logger.Info("Generated CSR")
+
+	crt, uri, err := client.CreateCert(ctx, csr, certDuration, true)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	siteConfig.ACMEDownloadURL = uri
+
+	logger.Info("Got cert from ACME", "certURL", uri)
+
+	pkPem, err := ToPEM(privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	crtPem, err := ToPEM(crt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return CertificatePEM(crtPem), PrivateKeyPEM(pkPem), nil
 }

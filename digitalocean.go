@@ -16,11 +16,33 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
+	"strconv"
 )
 
 var doAPIEndpoint = "https://api.digitalocean.com/v2/domains"
+
+type doTXTRecord struct {
+	Ref        int    `json:"id"`
+	DomainName string `json:"name"`
+	Data       string `json:"data"`
+}
+
+func (r *doTXTRecord) ID() string {
+	return strconv.Itoa(r.Ref)
+}
+
+func (r *doTXTRecord) Name() string {
+	return r.DomainName
+}
+
+func (r *doTXTRecord) Text() string {
+	return r.Data
+}
 
 // DOConfig encodes the configuration for the DigitalOcean DNS provider.
 type DOConfig struct {
@@ -53,7 +75,58 @@ func (d *DOProvider) Get(id string) (TXTRecord, error) {
 
 // Create implements the DNSProvider interface Create method.
 func (d *DOProvider) Create(proto TXTRecord) (string, error) {
-	return "", nil
+	logger := baseLogger.Named("DOProvider").Named("Create")
+
+	dnsReqBody := map[string]string{
+		"type": "TXT",
+		"name": proto.Name(),
+		"ttl":  strconv.Itoa(acmeChallengeTTL),
+		"data": proto.Text(),
+	}
+
+	logger.Debug("DNS record to create", "req", dnsReqBody)
+
+	body, err := json.Marshal(dnsReqBody)
+	if err != nil {
+		return "", err
+	}
+
+	uri := fmt.Sprintf("%s/%s/records", doAPIEndpoint, d.config.Zone)
+	logger.Trace("POST", "uri", uri)
+
+	req, err := http.NewRequest("POST", uri, bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", d.config.Token))
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != 201 {
+		return "", fmt.Errorf("bad response from DO API: %s", respBody)
+	}
+
+	out := struct {
+		Record doTXTRecord `json:"domain_record"`
+	}{}
+
+	err = json.Unmarshal(respBody, &out)
+	if err != nil {
+		return "", err
+	}
+
+	return out.Record.ID(), nil
 }
 
 // Delete implements the DNSProvider interface Delete method.
