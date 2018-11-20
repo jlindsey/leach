@@ -129,7 +129,7 @@ type TXTRecord interface {
 	// ID should return a string representation of the provider's internal record ID.
 	ID() string
 
-	// Name should return the name of the TXT record (not the FQDN).
+	// Name should return the FQDN of the TXT record.
 	Name() string
 
 	// Text should return the value of the TXT record.

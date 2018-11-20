@@ -118,6 +118,10 @@ func (k *KeyWatcher) Watch() error {
 
 				keys = append(keys, key)
 			}
+
+			if len(keys) == 0 {
+				k.checksum = nil
+			}
 		} else {
 			pair, meta, err = k.client.Get(k.path, opts)
 		}

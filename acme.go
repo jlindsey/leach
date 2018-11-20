@@ -25,7 +25,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/acme"
@@ -36,7 +35,7 @@ const (
 	keyBits      = 2048                // 2048-bit private keys
 	certDuration = 90 * 24 * time.Hour // LE only offers 90-day certs
 
-	acmeChallengeTTL       = 300
+	acmeChallengeTTL       = 30
 	acmeChallengeSubdomain = "_acme-challenge"
 
 	// PEM header types
@@ -280,10 +279,8 @@ func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteCo
 			}
 
 			if record == nil {
-				split := strings.Split(fqdn, ".")
-				subdomain := strings.Join(split[:len(split)-2], ".")
 				protoRecord := &GenericTXTRecord{
-					name: fmt.Sprintf("%s.%s", acmeChallengeSubdomain, subdomain),
+					name: fmt.Sprintf("%s.%s", acmeChallengeSubdomain, fqdn),
 					text: txtToken,
 				}
 
@@ -328,6 +325,7 @@ func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteCo
 					if try <= maxTries {
 						innerLogger.Info("Got error from WaitAuthorizaiton", "err", err, "attempt", try, "maxAttemps", maxTries)
 						time.Sleep(sleep)
+						try++
 						continue
 					}
 

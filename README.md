@@ -26,7 +26,11 @@ the list below is customizable with the `CONSUL_PREFIX` env var or flag and by d
         "organization": ["My Org"],
         "organizational_unit": ["My Dept"]
     },
-    "dns_config": {}
+    "dns_config": {
+        "default": {
+             // ...
+        }
+    }
 }
 ```
 

@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 var doAPIEndpoint = "https://api.digitalocean.com/v2/domains"
@@ -89,13 +90,13 @@ func (d *DOProvider) Get(id string) (TXTRecord, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
-	}
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -111,6 +112,8 @@ func (d *DOProvider) Get(id string) (TXTRecord, error) {
 		return nil, err
 	}
 
+	out.Record.DomainName = fmt.Sprintf("%s.%s", out.Record.DomainName, d.config.Zone)
+
 	return &out.Record, nil
 }
 
@@ -120,7 +123,7 @@ func (d *DOProvider) Create(proto TXTRecord) (string, error) {
 
 	dnsReqBody := map[string]string{
 		"type": "TXT",
-		"name": proto.Name(),
+		"name": strings.Replace(proto.Name(), fmt.Sprintf(".%s", d.config.Zone), "", 1),
 		"ttl":  strconv.Itoa(acmeChallengeTTL),
 		"data": proto.Text(),
 	}
