@@ -70,7 +70,48 @@ func NewDOProvider(config *DOConfig) *DOProvider {
 
 // Get implements the DNSProvider interface Get method.
 func (d *DOProvider) Get(id string) (TXTRecord, error) {
-	return nil, nil
+	logger := baseLogger.Named("DOProvider").Named("Get")
+
+	uri := fmt.Sprintf("%s/%s/records/%s", doAPIEndpoint, d.config.Zone, id)
+	logger = logger.With("url", uri)
+	logger.Trace("Fetching record")
+
+	req, err := http.NewRequest("GET", uri, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", d.config.Token))
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("bad response from DO API: %s", respBody)
+	}
+
+	out := struct {
+		Record doTXTRecord `json:"domain_record"`
+	}{}
+
+	err = json.Unmarshal(respBody, &out)
+	if err != nil {
+		return nil, err
+	}
+
+	return &out.Record, nil
 }
 
 // Create implements the DNSProvider interface Create method.
@@ -113,7 +154,7 @@ func (d *DOProvider) Create(proto TXTRecord) (string, error) {
 		return "", err
 	}
 
-	if resp.StatusCode != 201 {
+	if resp.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("bad response from DO API: %s", respBody)
 	}
 
@@ -131,5 +172,33 @@ func (d *DOProvider) Create(proto TXTRecord) (string, error) {
 
 // Delete implements the DNSProvider interface Delete method.
 func (d *DOProvider) Delete(id string) error {
+	logger := baseLogger.Named("DOProvider").Named("Get")
+
+	uri := fmt.Sprintf("%s/%s/records/%s", doAPIEndpoint, d.config.Zone, id)
+	logger = logger.With("url", uri)
+	logger.Trace("Fetching record")
+
+	req, err := http.NewRequest("DELETE", uri, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", d.config.Token))
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("bad response from DO API: %s", respBody)
+	}
+
 	return nil
 }

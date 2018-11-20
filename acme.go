@@ -42,6 +42,8 @@ const (
 	// PEM header types
 	privateKeyType = "RSA PRIVATE KEY"
 	certType       = "CERTIFICATE"
+
+	authStatusValid = "valid"
 )
 
 // CertificatePEM is a byte slice representing an x509 Certificate in PEM encoding.
@@ -172,31 +174,68 @@ func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteCo
 	}
 
 	auths := make(map[string]*acme.Authorization, len(siteConfig.ExtraNames)+1)
-	logger.Info("Requesting authorization")
-	auth, err := client.Authorize(ctx, siteConfig.FQDN)
-	if err != nil {
-		return nil, nil, err
+
+	if len(siteConfig.ACMEAuthorizationURLs) > 0 {
+		logger.Info("Checking existing authorizations")
+
+		for fqdn, authURL := range siteConfig.ACMEAuthorizationURLs {
+			l := logger.With("for", fqdn, "url", authURL)
+			l.Trace("Checking auth")
+
+			auth, err := client.GetAuthorization(ctx, authURL)
+			if err != nil {
+				l.Error("Error checking auth", "err", err)
+				siteConfig.RemoveAuthorizationURL(fqdn)
+			}
+
+			if auth.Status == authStatusValid {
+				l.Trace("Auth already valid")
+				auths[fqdn] = auth
+			}
+		}
 	}
 
-	auths[siteConfig.FQDN] = auth
-
-	for _, fqdn := range siteConfig.ExtraNames {
-		logger.Info("Requesting authorization", "fqdn", fqdn)
-		auth, err := client.Authorize(ctx, fqdn)
+	// Check for base FQDN auth and request if missing
+	if _, ok := auths[siteConfig.FQDN]; !ok {
+		logger.Info("Requesting authorization", "for", siteConfig.FQDN)
+		auth, err := client.Authorize(ctx, siteConfig.FQDN)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		auths[fqdn] = auth
+		auths[siteConfig.FQDN] = auth
 	}
+
+	// Check for extra FQDNs auths and request if missing
+	for _, fqdn := range siteConfig.ExtraNames {
+		if _, ok := auths[fqdn]; !ok {
+			logger.Info("Requesting authorization", "for", fqdn)
+			auth, err := client.Authorize(ctx, fqdn)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			auths[fqdn] = auth
+		}
+	}
+
+	fqdnsToAuth := make([]string, 0)
+	for fqdn := range auths {
+		fqdnsToAuth = append(fqdnsToAuth, fqdn)
+	}
+
+	logger.Debug("Requesting auths", "for", fqdnsToAuth)
 
 	var g errgroup.Group
 
 	for fqdn, auth := range auths {
 		g.Go(func() error {
-			innerLogger := logger.With("auth", auth.URI)
+			innerLogger := logger.With("auth", auth.URI, "for", fqdn)
 
-			if auth.Status == "valid" {
+			// Sometimes we can get into a bad state where the URL stored for an FQDN's auth
+			// will report as invalid but when we request a "new" auth it will be valid,
+			// so check again here.
+			if auth.Status == authStatusValid {
 				innerLogger.Info("Auth already valid")
 				return nil
 			}
@@ -219,22 +258,46 @@ func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteCo
 				return err
 			}
 
-			// TODO: check for existing record first
-			split := strings.Split(fqdn, ".")
-			subdomain := strings.Join(split[:len(split)-2], ".")
-			protoRecord := &GenericTXTRecord{
-				name: fmt.Sprintf("%s.%s", acmeChallengeSubdomain, subdomain),
-				text: txtToken,
+			var record TXTRecord
+			dnsID, ok := siteConfig.DNSProviderIDs[fqdn]
+			if ok {
+				record, err = provider.Get(dnsID)
+				if err != nil {
+					return err
+				}
+
+				innerLogger.Trace("Record found")
 			}
 
-			innerLogger.Debug("Creating DNS record", "record", protoRecord)
-
-			id, err := provider.Create(protoRecord)
-			if err != nil {
-				return err
+			if record != nil && record.Text() != txtToken {
+				innerLogger.Trace("Record exists but does not match, recreating")
+				err = provider.Delete(record.ID())
+				if err != nil {
+					return err
+				}
+				siteConfig.RemoveDNSID(fqdn)
+				record = nil
 			}
 
-			siteConfig.DNSProviderIDs = append(siteConfig.DNSProviderIDs, id)
+			if record == nil {
+				split := strings.Split(fqdn, ".")
+				subdomain := strings.Join(split[:len(split)-2], ".")
+				protoRecord := &GenericTXTRecord{
+					name: fmt.Sprintf("%s.%s", acmeChallengeSubdomain, subdomain),
+					text: txtToken,
+				}
+
+				innerLogger.Debug("Creating DNS record", "record", protoRecord)
+
+				id, err := provider.Create(protoRecord)
+				if err != nil {
+					return err
+				}
+
+				siteConfig.AddDNSID(fqdn, id)
+			} else {
+				logger.Trace("Record matches already")
+			}
 
 			txtFQDN := fmt.Sprintf("%s.%s", acmeChallengeSubdomain, fqdn)
 			innerLogger.Debug("Waiting for DNS", "txtFQDN", txtFQDN)
@@ -272,6 +335,9 @@ func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteCo
 				}
 
 				innerLogger.Info("Auth accepted", "authz", goodAuth.Identifier)
+
+				siteConfig.AddAuthorizationURL(fqdn, goodAuth.URI)
+
 				break
 			}
 

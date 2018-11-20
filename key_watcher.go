@@ -83,16 +83,17 @@ func (k *KeyWatcher) Close() error {
 
 // Watch starts the watcher. Should be run in a goroutine, preferably with an errgroup.
 func (k *KeyWatcher) Watch() error {
-	logger := k.logger.Named("Watch").With("index", k.index)
-	logger.Trace("Starting")
+	k.logger.Trace("Starting")
 
 	for {
 		select {
 		case <-k.ctx.Done():
-			logger.Trace("Context canceled")
+			k.logger.Trace("Context canceled")
 			return k.Close()
 		default:
 		}
+
+		logger := k.logger.Named("Watch").With("index", k.index)
 
 		opts := &consul.QueryOptions{
 			WaitIndex: k.index,
@@ -101,8 +102,8 @@ func (k *KeyWatcher) Watch() error {
 		opts = opts.WithContext(k.ctx)
 
 		var (
-			pair *consul.KVPair
 			keys []string
+			pair *consul.KVPair
 			meta *consul.QueryMeta
 			err  error
 		)
@@ -121,6 +122,8 @@ func (k *KeyWatcher) Watch() error {
 			pair, meta, err = k.client.Get(k.path, opts)
 		}
 
+		logger.Trace("Got change", "keys", keys != nil, "pair", pair != nil)
+
 		if err != nil {
 			if strings.Contains(err.Error(), "context canceled") {
 				// TODO: is there a better way to detect this?
@@ -132,8 +135,9 @@ func (k *KeyWatcher) Watch() error {
 		k.index = meta.LastIndex
 
 		if pair == nil && keys == nil {
+			logger.Trace("No data")
 			if k.CancelOnMissing {
-				k.logger.Debug("Key disappeared, canceling")
+				logger.Debug("Key disappeared, canceling")
 				k.cancel()
 			}
 

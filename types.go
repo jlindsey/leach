@@ -16,7 +16,9 @@
 package main
 
 import (
+	"crypto/x509"
 	"fmt"
+	"sync"
 )
 
 // Config is the main config struct, encoding the data from
@@ -52,18 +54,56 @@ type SiteConfig struct {
 
 // RevokeConfig is the configuration for the revoke/ path.
 type RevokeConfig struct {
-	SiteConfig `json:"-"`
-	Purge      bool `json:"purge"`
+	*SiteConfig `json:"-"`
+	Cert        *x509.Certificate `json:"-"`
+	Purge       bool              `json:"purge"`
 }
 
 // SiteConfigInternal contains the set of internal-only SiteConfig values, stored
 // separately from the main SiteConfig.
 type SiteConfigInternal struct {
+	mut *sync.Mutex
+
 	// Used internally. The provider-specific IDs for the challenge records.
-	DNSProviderIDs []string `json:"dns_provider_ids,omitempty"`
+	DNSProviderIDs map[string]string `json:"dns_provider_ids,omitempty"`
+
+	// Used internally. The ACME identifier URL(s) for the domain(s) authorization approval.
+	ACMEAuthorizationURLs map[string]string `json:"acme_authorization_urls,omitempty"`
 
 	// Used internally. The ACME identifier URL for re-downloading the certificate.
 	ACMEDownloadURL string `json:"acme_download_url,omitempty"`
+}
+
+// AddDNSID is a thread-safe append to DNS IDs map
+func (s *SiteConfigInternal) AddDNSID(domain, id string) {
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	s.DNSProviderIDs[domain] = id
+}
+
+// RemoveDNSID is a thread-safe delete from the DNS IDs map
+func (s *SiteConfigInternal) RemoveDNSID(domain string) {
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	delete(s.DNSProviderIDs, domain)
+}
+
+// AddAuthorizationURL is a thread-safe append to the Authorization URLs map
+func (s *SiteConfigInternal) AddAuthorizationURL(domain, url string) {
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	s.ACMEAuthorizationURLs[domain] = url
+}
+
+// RemoveAuthorizationURL is a thread-safe delete from the Authorization URLs map
+func (s *SiteConfigInternal) RemoveAuthorizationURL(domain string) {
+	s.mut.Lock()
+	defer s.mut.Unlock()
+
+	delete(s.ACMEAuthorizationURLs, domain)
 }
 
 // GetProvider returns the DNSProvider for this site
@@ -125,6 +165,7 @@ type DNSProvider interface {
 	// Delete accepts the record ID and deletes that record.
 	Delete(string) error
 
-	// Get fetches the TXT record with the given ID.
+	// Get fetches the TXT record with the given ID. If the record does not exist, it's acceptable
+	// to return (nil, nil) from this method, and the authorization routine will make a new one.
 	Get(string) (TXTRecord, error)
 }
