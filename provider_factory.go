@@ -21,9 +21,12 @@ import (
 )
 
 const (
-	defaultName    = "default"
-	providerKey    = "provider"
-	doProviderName = "digitalocean"
+	defaultName = "default"
+	providerKey = "provider"
+
+	doProviderName  = "digitalocean"
+	ibProviderName  = "infoblox"
+	awsProviderName = "aws"
 )
 
 type providerEnvelope struct {
@@ -71,6 +74,15 @@ func (f *ProviderFactory) UnmarshalJSON(b []byte) error {
 			}
 
 			provider := NewDOProvider(doConfig)
+			f.providers[name] = provider
+		case ibProviderName:
+			ibConfig := new(IBConfig)
+			err = json.Unmarshal(raw, ibConfig)
+			if err != nil {
+				return err
+			}
+
+			provider := NewIBProvider(ibConfig)
 			f.providers[name] = provider
 		default:
 			return fmt.Errorf("Unsupported or missing provider for `%s`: %s", name, pe.ProviderName)
