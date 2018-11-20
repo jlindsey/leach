@@ -12,7 +12,7 @@ Setup
 -----
 
 To bootstrap the tool, a config key needs to be added to Consul's KV store. The `{PREFIX}` in
-the list below is customizable with the `CONSUL_PREFIX` env var or flag and by default is `Leach`.
+the list below is customizable with the `CONSUL_PREFIX` env var or flag and by default is `leach`.
 
 `{PREFIX}/conf` must be a JSON doc like so:
 
