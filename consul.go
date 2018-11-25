@@ -8,10 +8,46 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	consul "github.com/hashicorp/consul/api"
 	"github.com/imdario/mergo"
 )
+
+func maintainConsulService(ctx context.Context, agent *consul.Agent) error {
+	service := &consul.AgentServiceRegistration{
+		Name: "Leach",
+		Check: &consul.AgentServiceCheck{
+			CheckID: "leach",
+			Name:    "Leach TTL",
+			TTL:     "30s",
+			Status:  consul.HealthPassing,
+		},
+	}
+
+	err := agent.ServiceRegister(service)
+	if err != nil {
+		return err
+	}
+	baseLogger.Debug("Registered service with Consul")
+
+	ticker := time.NewTicker(10 * time.Second)
+	baseLogger.Trace("Starting TTL check goroutine")
+	for {
+		select {
+		case <-ctx.Done():
+			baseLogger.Debug("Deregistering service")
+			return agent.ServiceDeregister(service.Name)
+		case <-ticker.C:
+			watchersMut.RLock()
+			output := fmt.Sprintf("Healthy - Watching %d keys", len(watchers))
+			watchersMut.RUnlock()
+			baseLogger.Trace("consul check-in", "output", output)
+			agent.UpdateTTL(service.Check.CheckID, output, consul.HealthPassing)
+		}
+	}
+
+}
 
 func getAllSites(ctx context.Context, kv *consul.KV, prefix string, config *Config) ([]*SiteConfig, error) {
 	sitePath := fmt.Sprintf("%s/%s/", prefix, consulSitesPrefix)

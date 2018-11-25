@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	consul "github.com/hashicorp/consul/api"
@@ -130,6 +132,14 @@ func run(c *cli.Context) error {
 		Output: os.Stdout,
 	})
 
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGQUIT)
+	go func() {
+		sig := <-quit
+		baseLogger.Debug("Caught", "sig", sig)
+		rootCancel()
+	}()
+
 	baseLogger.Trace("Consul", "addr", consulAddr, "prefix", prefix)
 
 	consulConfig := &consul.Config{
@@ -174,6 +184,8 @@ func run(c *cli.Context) error {
 			break
 		}
 	}
+
+	g.Go(func() error { return maintainConsulService(ctx, consulClient.Agent()) })
 
 	auth, err := getAuth(rootCtx, kv, prefix)
 	if err != nil {
