@@ -198,6 +198,13 @@ must be unique. There _must_ be exactly one `default` provider.
 }
 ```
 
+Web Interface
+-------------
+
+A simple web interface for viewing the status of the tool is enabled by setting the `--bind` flag (or `BIND`
+env var) to an address and port such as `0.0.0.0:8080`. The interface is opt-in, you must set this option
+to enable it.
+
 Development
 -----------
 

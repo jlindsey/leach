@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <title>Leach</title>
+    <link rel="stylesheet" href="/assets/normalize.css">
+    <link rel="stylesheet" href="/assets/screen.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <h1>Leach</h1>
+        </nav>
+    </header>
+
+    <div class="content">
+        <h2>Stored Certs</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>FQDN</th>
+                    <th>Extra Names</th>
+                    <th>Expires</th>
+                </tr>
+            </thead>
+            <tbody>
+            {{range .Certs}}
+                <tr>
+                    <td>{{.FQDN}}</td>
+                    {{if .ExtraNames}}
+                    <td>{{StringsJoin .ExtraNames ", "}}</td>
+                    {{else}}
+                    <td><em>N/A</em></td>
+                    {{end}}
+                    <td>{{.NotAfter.Format "2006-01-02"}}</td>
+                </tr>
+            {{end}}
+            </tbody>
+        </table>
+    </div>
+
+    <footer>
+        <aside class="version-info">Leach {{.Version}} ({{.GitSHA}})</aside>
+    </footer>
+</body>
+</html>

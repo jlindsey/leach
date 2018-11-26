@@ -62,3 +62,4 @@ old/
 .envrc
 *.pem
 *.pub
+*-packr.go

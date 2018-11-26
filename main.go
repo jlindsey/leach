@@ -96,6 +96,11 @@ func main() {
 			EnvVar: "ACME_URL",
 		},
 		cli.StringFlag{
+			Name:   "bind, b",
+			Usage:  "Address and port to bind the web interface to. Disables web if not set",
+			EnvVar: "BIND",
+		},
+		cli.StringFlag{
 			Name:   "log-level, l",
 			Usage:  "Set the logger to the specified `LEVEL`",
 			Value:  defaultLogLevel,
@@ -156,6 +161,7 @@ func run(c *cli.Context) error {
 	config := new(Config)
 	configPath := fmt.Sprintf("%s/%s", prefix, consulConfigKey)
 	configWatcher := NewKeyWatcher(rootCtx, kv, configPath)
+	watchers[consulConfigKey] = configWatcher
 	g.Go(configWatcher.Watch)
 	g.Go(func() error {
 		for {
@@ -212,6 +218,9 @@ func run(c *cli.Context) error {
 
 	g.Go(func() error { return watchManager(ctx, prefix, kv) })
 	g.Go(func() error { return converger(ctx, kv, prefix, acmeClient, config) })
+	if c.String("bind") != "" {
+		g.Go(func() error { return runWeb(ctx, c.String("bind"), prefix, kv) })
+	}
 
 	err = g.Wait()
 	baseLogger.Trace("Primary errgroup returned")
