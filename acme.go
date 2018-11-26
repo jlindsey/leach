@@ -300,6 +300,12 @@ func CreateACMECert(ctx context.Context, client *acme.Client, siteConfig *SiteCo
 			innerLogger.Debug("Waiting for DNS", "txtFQDN", txtFQDN)
 
 			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+				}
+
 				vals, err := net.LookupTXT(txtFQDN)
 				if err != nil || len(vals) == 0 || vals[0] != txtToken {
 					innerLogger.Trace("Still waiting", "err", err, "vals", vals)

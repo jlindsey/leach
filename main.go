@@ -500,7 +500,7 @@ func doRevoke(ctx context.Context, prefix string, kv *consul.KV, acmeClient *acm
 	logger.Info("Revoking cert")
 	err := acmeClient.RevokeCert(ctx, nil, rev.Cert.Raw, acme.CRLReasonUnspecified)
 	if err != nil {
-		return err
+		logger.Error("Unable to revoke ACME cert", "err", err)
 	}
 
 	ops := consul.KVTxnOps{
@@ -538,7 +538,7 @@ func doRevoke(ctx context.Context, prefix string, kv *consul.KV, acmeClient *acm
 			logger.Info("Deleting DNS record", "id", id)
 			err = dns.Delete(id)
 			if err != nil {
-				return err
+				logger.Error("Unable to delete DNS record", "err", err)
 			}
 		}
 
@@ -546,7 +546,7 @@ func doRevoke(ctx context.Context, prefix string, kv *consul.KV, acmeClient *acm
 			logger.Info("Revoking ACME Authorization", "url", url)
 			err = acmeClient.RevokeAuthorization(ctx, url)
 			if err != nil {
-				return err
+				logger.Error("Unable to revoke ACME authorization", "err", err)
 			}
 		}
 	}
