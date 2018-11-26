@@ -65,6 +65,8 @@ func (f *ProviderFactory) UnmarshalJSON(b []byte) error {
 			return err
 		}
 
+		var provider DNSProvider
+
 		switch pe.ProviderName {
 		case doProviderName:
 			doConfig := new(DOConfig)
@@ -73,8 +75,7 @@ func (f *ProviderFactory) UnmarshalJSON(b []byte) error {
 				return err
 			}
 
-			provider := NewDOProvider(doConfig)
-			f.providers[name] = provider
+			provider = NewDOProvider(doConfig)
 		case ibProviderName:
 			ibConfig := new(IBConfig)
 			err = json.Unmarshal(raw, ibConfig)
@@ -82,11 +83,23 @@ func (f *ProviderFactory) UnmarshalJSON(b []byte) error {
 				return err
 			}
 
-			provider := NewIBProvider(ibConfig)
-			f.providers[name] = provider
+			provider = NewIBProvider(ibConfig)
+		case awsProviderName:
+			awsConfig := new(AWSConfig)
+			err = json.Unmarshal(raw, awsConfig)
+			if err != nil {
+				return nil
+			}
+
+			provider, err = NewAWSProvider(awsConfig)
+			if err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("Unsupported or missing provider for `%s`: %s", name, pe.ProviderName)
 		}
+
+		f.providers[name] = provider
 	}
 
 	return nil

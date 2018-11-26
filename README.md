@@ -94,8 +94,8 @@ have no default.
 
 ```javascript
 {
-    // Email address to register with LE
-    "email": *,
+    // Email address to register with LE. Note that it must begin with the `mailto:`.
+    "email": "mailto:*",
 
     // CSR Subject values for requesting certs. All keys below are required and must be arrays.
     "ident": {
@@ -130,6 +130,28 @@ welcome.
 
 Multiple providers of a given type are allowed, but their names (the keys for the config dicts)
 must be unique. There _must_ be exactly one `default` provider.
+
+#### AWS Route53
+
+```javascript
+{
+    "dns_config": {
+        "default": {
+            // AWS Provider
+            "provider": "aws",
+
+            // AWS Access Key ID
+            "access_key_id": *,
+
+            // AWS Secret Access Key
+            "secret_access_key": *,
+
+            // Route53 Managed Domain ID
+            "domain_id": *
+        }
+    }
+}
+```
 
 #### DigitalOcean
 
