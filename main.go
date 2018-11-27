@@ -372,7 +372,7 @@ func converger(ctx context.Context, kv *consul.KV, prefix string, acmeClient *ac
 			logger.Trace("context closed")
 			return nil
 		case _, ok := <-convergeChan:
-			logger.Trace("converge chan hit")
+			logger.Debug("converge chan hit")
 			if !ok {
 				logger.Trace("converge chan closed")
 				return nil
@@ -382,7 +382,7 @@ func converger(ctx context.Context, kv *consul.KV, prefix string, acmeClient *ac
 				<-timer.C
 			}
 		case <-timer.C:
-			logger.Trace("timer hit")
+			logger.Debug("timer hit")
 		}
 
 		// Reset the timer after every convergence

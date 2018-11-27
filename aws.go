@@ -156,7 +156,7 @@ func (a *AWSProvider) Create(proto TXTRecord) (string, error) {
 
 	logger.Trace("AWS response", "response", resp)
 
-	logger.Trace("Waiting for Route53 propagation")
+	logger.Debug("Waiting for Route53 propagation")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

@@ -205,6 +205,9 @@ A simple web interface for viewing the status of the tool is enabled by setting 
 env var) to an address and port such as `0.0.0.0:8080`. The interface is opt-in, you must set this option
 to enable it.
 
+A simple health-check endpoint is available at `/healthz`, which will return HTTP 200 when healthy, 500 on
+error, and 503 when shutting down or starting up.
+
 Development
 -----------
 
