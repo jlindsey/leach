@@ -8,11 +8,9 @@ require (
 	github.com/circonus-labs/circonus-gometrics v2.2.4+incompatible // indirect
 	github.com/circonus-labs/circonusllhist v0.1.0 // indirect
 	github.com/go-ini/ini v1.39.0 // indirect
-	github.com/gobuffalo/buffalo-plugins v1.7.0 // indirect
-	github.com/gobuffalo/packd v0.0.0-20181120223505-a1fb7d1c9873 // indirect
-	github.com/gobuffalo/packr v1.21.3 // indirect
-	github.com/gobuffalo/packr/v2 v2.0.0-rc.6
-	github.com/gobuffalo/syncx v0.0.0-20181120194010-558ac7de985f // indirect
+	github.com/gobuffalo/buffalo-plugins v1.7.2 // indirect
+	github.com/gobuffalo/meta v0.0.0-20181127070345-0d7e59dd540b // indirect
+	github.com/gobuffalo/packr/v2 v2.0.0-rc.7
 	github.com/gogo/protobuf v1.1.1 // indirect
 	github.com/gopherjs/gopherjs v0.0.0-20181103185306-d547d1d9531e // indirect
 	github.com/hashicorp/consul v1.3.0
@@ -44,10 +42,8 @@ require (
 	github.com/smartystreets/assertions v0.0.0-20180927180507-b2de0cb4f26d // indirect
 	github.com/smartystreets/goconvey v0.0.0-20181108003508-044398e4856c // indirect
 	github.com/tv42/httpunix v0.0.0-20150427012821-b75d8614f926 // indirect
-	golang.org/x/crypto v0.0.0-20181112202954-3d3f9f413869
+	golang.org/x/crypto v0.0.0-20181126163421-e657309f52e7
 	golang.org/x/sync v0.0.0-20181108010431-42b317875d0f
-	golang.org/x/sys v0.0.0-20181122145206-62eef0e2fa9b // indirect
-	golang.org/x/tools v0.0.0-20181122213734-04b5d21e00f1 // indirect
 	google.golang.org/appengine v1.3.0 // indirect
 	gopkg.in/ini.v1 v1.39.0 // indirect
 	gopkg.in/urfave/cli.v1 v1.20.0
