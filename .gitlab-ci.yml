@@ -8,5 +8,8 @@ build:
   variables:
     GOOS: linux
     GOARCH: amd64
+    GO11MODULE: 'on'
+  before_script:
+    - RUN go get -u -v github.com/gobuffalo/packr/v2/packr2
   script:
-    - make release
+    - make clean release

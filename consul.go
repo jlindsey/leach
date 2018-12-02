@@ -76,8 +76,8 @@ func getAllCerts(ctx context.Context, kv *consul.KV, prefix string) ([]*x509.Cer
 		return nil, err
 	}
 
-	certs := make([]*x509.Certificate, len(pairs)/2)
-	for i, pair := range pairs {
+	certs := make([]*x509.Certificate, 0)
+	for _, pair := range pairs {
 		if strings.HasSuffix(pair.Key, "-key.pem") {
 			continue
 		}
@@ -88,7 +88,7 @@ func getAllCerts(ctx context.Context, kv *consul.KV, prefix string) ([]*x509.Cer
 			return nil, err
 		}
 
-		certs[i] = cert
+		certs = append(certs, cert)
 	}
 
 	return certs, nil
