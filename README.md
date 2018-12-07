@@ -18,7 +18,7 @@ the list below is customizable with the `CONSUL_PREFIX` env var or flag and by d
 
 ```javascript
 {
-    "email": "test@example.com",
+    "email": "mailto:test@example.com",
     "ident": {
         "country": ["US"],
         "province": ["Virginia"],
