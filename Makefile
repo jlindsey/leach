@@ -18,7 +18,10 @@ main-packr.go: $(WEB_SRC)
 	packr2;\
 	$(SED) -i "s,$${PWD#/},$$MODULE_NAME," $@;\
 
-$(BUILD_DIR)/$(PROJECT_NAME): $(SRC) go.mod go.sum
+go.sum: go.mod
+	go mod tidy -v
+
+$(BUILD_DIR)/$(PROJECT_NAME): $(SRC) go.sum
 	go build -o $@ -ldflags="$(LD_VERSION_FLAGS)"
 
 $(RELEASE_DIR)/$(PROJECT_NAME): $(SRC) packr go.mod go.sum
