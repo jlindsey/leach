@@ -1,3 +1,5 @@
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fjlindsey%2Fleach.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fjlindsey%2Fleach?ref=badge_shield)
+
 Leach
 ======
 
@@ -226,3 +228,7 @@ to be installed and on your `PATH`.
 
 You should also set the `ACME_URL` variable to the URL of the [LE Staging Servers](https://letsencrypt.org/docs/staging-environment/),
 which keeps you from being throttled and wasting your domain rate limit on dev and testing.
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fjlindsey%2Fleach.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fjlindsey%2Fleach?ref=badge_large)
